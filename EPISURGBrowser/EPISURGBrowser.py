@@ -26,7 +26,7 @@ and Steve Pieper, Isomics, Inc. and was partially funded by NIH grant 3P41RR0132
 """
 
 
-class EPISURGBrowserWidget(ScriptedLoadableModuleWidget):
+class EPISURGBrowserWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
   """Uses ScriptedLoadableModuleWidget base class, available at:
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
   """
@@ -35,7 +35,8 @@ class EPISURGBrowserWidget(ScriptedLoadableModuleWidget):
     """
     Called when the user opens the module the first time and the widget is initialized.
     """
-    super().__init__(parent)
+    ScriptedLoadableModuleWidget.__init__(self, parent)
+    VTKObservationMixin.__init__(self)  # needed for parameter node observation
     self.logic = None
     self.subjects = None
 
@@ -44,6 +45,7 @@ class EPISURGBrowserWidget(ScriptedLoadableModuleWidget):
     self.logic = EPISURGBrowserLogic()
     self.makeGUI()
     slicer.episurgBrowser = self
+    self.addObserver(slicer.mrmlScene, slicer.mrmlScene.StartCloseEvent, self.onSceneStartClose)
 
   def makeGUI(self):
     self.setDirButton = ctk.ctkCollapsibleButton()
@@ -100,6 +102,14 @@ class EPISURGBrowserWidget(ScriptedLoadableModuleWidget):
     }
     return subjectsDict
 
+  def cleanupSubjects(self):
+    for subject in self.subjects.values():
+      subject.cleanup()
+
+  def cleanup(self):
+    """Called when the application closes and the module widget is destroyed."""
+    self.removeObservers()
+
   # Slots
   def onLoadSubjectsButton(self):
     self.datasetDirEdit.addCurrentPathToHistory()
@@ -110,6 +120,10 @@ class EPISURGBrowserWidget(ScriptedLoadableModuleWidget):
     self.subjectsComboBox.blockSignals(False)
     self.setDirButton.setEnabled(False)
     self.subjectsButton.setEnabled(True)
+
+  def onSceneStartClose(self, caller, event):
+    """Called just before the scene is closed."""
+    self.cleanupSubjects()
 
   def onPreviousSubjectButton(self):
     self.subjectsComboBox.currentIndex -= 1
@@ -124,6 +138,7 @@ class EPISURGBrowserWidget(ScriptedLoadableModuleWidget):
       return
 
     try:
+      self.cleanupSubjects()
       self.logic.closeScene()
       subject.load()
       self.logic.jumpToFirstSegment(subject.rater1SegNode)
@@ -153,14 +168,17 @@ class Subject:
     self.rater1SegPath = self.t1PostDir / f'{self.id}_postop-seg-1.nii.gz'
     self.rater2SegPath = self.t1PostDir / f'{self.id}_postop-seg-2.nii.gz'
     self.rater3SegPath = self.t1PostDir / f'{self.id}_postop-seg-3.nii.gz'
+    self.cleanup()
+
+  def __repr__(self):
+    return f'Subject("{self.id}")'
+
+  def cleanup(self):
     self.t1PreNode = None
     self.t1PostNode = None
     self.rater1SegNode = None
     self.rater2SegNode = None
     self.rater3SegNode = None
-
-  def __repr__(self):
-    return f'Subject("{self.id}")'
 
   def loadVolumeIfPresent(self, path):
     if not path.is_file(): return
