@@ -6,6 +6,10 @@ from slicer.util import VTKObservationMixin
 from EPISURGBase import EPISURGBaseLogic  # pylint: disable=import-error
 
 
+EPISURG_URL = 'https://s3-eu-west-1.amazonaws.com/pstorage-ucl-2748466690/26153588/EPISURG.zip'
+EPISURG_CHECKSUM = 'MD5:5ec5831a2c6fbfdc8489ba2910a6504b'
+
+
 class EPISURGBrowser(ScriptedLoadableModule):
   """Uses ScriptedLoadableModule base class, available at:
   https://github.com/Slicer/Slicer/blob/master/Base/Python/slicer/ScriptedLoadableModule.py
@@ -13,16 +17,15 @@ class EPISURGBrowser(ScriptedLoadableModule):
 
   def __init__(self, parent):
     super().__init__(parent)
-    self.parent.title = "EPISURG Browser"  # TODO: make this more human readable by adding spaces
-    self.parent.categories = ["EPISURG"]  # TODO: set categories (folders where the module shows up in the module selector)
-    self.parent.dependencies = []  # TODO: add here list of module names that this module requires
+    self.parent.title = "EPISURG Browser"
+    self.parent.categories = ["EPISURG"]
+    self.parent.dependencies = []
     self.parent.helpText = """
-This is an example of scripted loadable module bundled in an extension.
-See more information in <a href="https://github.com/organization/projectname#EPISURGBrowser">module documentation</a>.
+This module can be used to download and visualize the <a href="https://doi.org/10.5522/04/9996158.v1">EPISURG dataset</a>.
+See more information in the <a href="https://github.com/fepegar/resseg-ijcars">paper repository</a>.
 """
-    self.parent.acknowledgementText = """
-This file was originally developed by Jean-Christophe Fillion-Robin, Kitware Inc., Andras Lasso, PerkLab,
-and Steve Pieper, Isomics, Inc. and was partially funded by NIH grant 3P41RR013218-12S1.
+    self.parent.acknowledgementText = """This file was developed by Fernando
+Perez-Garcia (University College London and King's College London).
 """
 
 
@@ -61,6 +64,10 @@ class EPISURGBrowserWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.datasetDirButton.clicked.connect(self.onLoadSubjectsButton)
     setDirLayout.addWidget(self.datasetDirButton)
 
+    self.downloadDatasetButton = qt.QPushButton('Download dataset')
+    self.downloadDatasetButton.clicked.connect(self.onDownloadDatasetButton)
+    setDirLayout.addWidget(self.downloadDatasetButton)
+
     self.subjectsButton = ctk.ctkCollapsibleButton()
     self.subjectsButton.text = 'Select subject to load'
     self.subjectsButton.setEnabled(False)
@@ -82,8 +89,16 @@ class EPISURGBrowserWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     self.layout.addStretch()
 
+  def getCurrentPath(self):
+    text = self.datasetDirEdit.currentPath
+    if not text:
+      slicer.util.errorDisplay(
+        f'Please enter a directory in the widget')
+      raise
+    return Path(text).expanduser().absolute()
+
   def getSubjectsDict(self):
-    datasetDir = Path(self.datasetDirEdit.currentPath).expanduser().absolute()
+    datasetDir = self.getCurrentPath()
     if not datasetDir.is_dir():
       slicer.util.errorDisplay(f'{datasetDir} is not a directory')
       raise
@@ -120,6 +135,31 @@ class EPISURGBrowserWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     self.subjectsComboBox.blockSignals(False)
     self.setDirButton.setEnabled(False)
     self.subjectsButton.setEnabled(True)
+
+  def onDownloadDatasetButton(self):
+    episurgDir = self.getCurrentPath()
+    subjectsDir = episurgDir / 'subjects'
+    if not subjectsDir.is_dir():
+      outputDir = episurgDir.parent
+      outputDir.mkdir(exist_ok=True, parents=True)
+      archiveFilePath = outputDir / 'episurg.zip'
+      try:
+        qt.QApplication.setOverrideCursor(qt.Qt.WaitCursor)
+        success = slicer.util.downloadAndExtractArchive(
+          EPISURG_URL,
+          str(archiveFilePath),
+          str(outputDir),
+          checksum=EPISURG_CHECKSUM,
+        )
+        if success:
+          archiveFilePath.unlink()
+        else:
+          slicer.util.errorDisplay('Error downloading the dataset')
+      except Exception as e:
+        slicer.util.errorDisplay(str(e))
+      finally:
+        qt.QApplication.restoreOverrideCursor()
+    self.onLoadSubjectsButton()
 
   def onSceneStartClose(self, caller, event):
     """Called just before the scene is closed."""
